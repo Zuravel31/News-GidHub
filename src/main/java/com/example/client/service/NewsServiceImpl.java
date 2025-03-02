@@ -55,7 +55,7 @@ public class NewsServiceImpl implements NewsService {
                     Optional<News> existingNews = newsRepository.findByText(news.getText());
                     // 3. Если новость есть в Memcached ИЛИ в базе данных, пропускаем
                     if (cachedNews != null || existingNews.isPresent()) {
-                        log.info("Новость найдена в Memcached или базе данных, пропущена: {}", news.getText());
+//                        log.info("Новость найдена в Memcached или базе данных, пропущена: {}", news.getText());
                         continue; // Переходим к следующей новости
                     }
                     // 4. Установка значения для isSent, если оно не установлено
