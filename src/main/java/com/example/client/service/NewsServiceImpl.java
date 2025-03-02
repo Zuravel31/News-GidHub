@@ -7,9 +7,12 @@ import com.example.client.mapper.NewsMapper;
 import com.example.client.repository.NewsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.spy.memcached.MemcachedClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
 
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +28,16 @@ public class NewsServiceImpl implements NewsService {
 
     private final NewsClient client;
 
+    private static final String NEWS_PREFIX = "news:";
+    @Autowired(required = false) // Memcached может быть не настроен
+    MemcachedClient memcachedClient;
+
+    // Метод для генерации ключа на основе MD5 хеша
+    private String generateKey(String text) {
+        String hash = DigestUtils.md5DigestAsHex(text.getBytes());
+        return NEWS_PREFIX + hash;
+    }
+
     public void fetchAndSaveAllNews() {
         List<NewsDTO> newsDTOs = client.getAllNews();
         if (newsDTOs != null && !newsDTOs.isEmpty()) {
@@ -33,29 +46,40 @@ public class NewsServiceImpl implements NewsService {
                     .toList();
 
             for (News news : newsList) {
-                // Проверка наличия дубликата перед сохранением
-                Optional<News> existingNews = newsRepository.findByText(news.getText());
-                if (existingNews.isPresent()) {
-                    // Логика для обработки дубликата
-//                    log.warn("Пропущена дублирующаяся новость: {}", news.getText());
-                } else {
-                    // Установка значения для isSent, если оно не установлено
+                // Генерируем ключ на основе MD5 хеша
+                String key = generateKey(news.getText());
+                try {
+                    // 1. Проверяем Memcached
+                    News cachedNews = (memcachedClient != null) ? (News) memcachedClient.get(key) : null;
+                    // 2. Проверяем базу данных, если нет в Memcached
+                    Optional<News> existingNews = newsRepository.findByText(news.getText());
+                    // 3. Если новость есть в Memcached ИЛИ в базе данных, пропускаем
+                    if (cachedNews != null || existingNews.isPresent()) {
+                        log.info("Новость найдена в Memcached или базе данных, пропущена: {}", news.getText());
+                        continue; // Переходим к следующей новости
+                    }
+                    // 4. Установка значения для isSent, если оно не установлено
                     if (news.getIsSent() == null) {
                         news.setIsSent(false); // или true, в зависимости от логики
                     }
-
-                    // Сохранение новости
+                    // 5. Сохранение новости
                     try {
                         newsRepository.save(news);
-                        log.info("Новость сохранена: {}", news.getText());
+                        log.info("Новость сохранена в базе данных: {}", news.getText());
+
+                        // 6. Кэшируем новость в Memcached после сохранения в базу данных
+                        if (memcachedClient != null) {
+                            memcachedClient.set(key, 3600, news); // Кэшируем на 1 час
+                            log.info("Новость сохранена в Memcached: {}", news.getText());
+                        }
                     } catch (DataIntegrityViolationException e) {
-                        // Обработка других возможных ошибок целостности данных
-                        log.error("Ошибка при сохранении новости: {}", news.getText(), e);
+                        log.error("Ошибка при сохранении новости в базе данных: {}", news.getText(), e);
                     }
+                } catch (Exception e) {
+                    log.error("Ошибка при обработке новости {}: {}", news.getText(), e.getMessage(), e);
                 }
             }
-
-            log.info("Сохранено {} новостей в базе данных.", newsList.size());
+            log.info("Обработано {} новостей.", newsList.size());
         } else {
             log.warn("Не получено новостей от клиента.");
         }
@@ -75,5 +99,3 @@ public class NewsServiceImpl implements NewsService {
         }
     }
 }
-
-
