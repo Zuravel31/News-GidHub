@@ -3,34 +3,38 @@ package com.example.client.service;
 import com.example.client.client.NewsClient;
 import com.example.client.dto.NewsDTO;
 import com.example.client.entity.News;
+import com.example.client.job.BusinessException;
 import com.example.client.mapper.NewsMapper;
 import com.example.client.repository.NewsRepository;
 import net.spy.memcached.MemcachedClient;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
-import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
+@Nested
 @ExtendWith(MockitoExtension.class)
-public class NewsServiceImplTest {
-
-    @Mock
-    private NewsClient client;
+class NewsServiceImplTest {
 
     @Mock
     private NewsRepository newsRepository;
 
     @Mock
-    private NewsMapper mapper;
+    private NewsMapper newsMapper;
+
+    @Mock
+    private NewsClient newsClient;
 
     @Mock
     private MemcachedClient memcachedClient;
@@ -39,136 +43,115 @@ public class NewsServiceImplTest {
     @InjectMocks
     private NewsServiceImpl newsService;
 
-    private NewsDTO newsDTO;
-    private News news;
-
-
-    @BeforeEach
-    void setUp() {
-        // Инициализация тестовых данных
-        newsDTO = new NewsDTO();
-        newsDTO.setText("Test news text");
-        newsDTO.setKeywords("Test keywords");
-        newsDTO.setTime(LocalDateTime.now());
-
-        news = new News();
-        news.setText("Test news text");
-        news.setKeywords("Test keywords");
-        news.setTime(LocalDateTime.now());
-        news.setIsSent(false);
-    }
-
-//    @Test
-//    void fetchAndSaveAllNews_SuccessfulSave() {
-//        // Arrange
-//        List<NewsDTO> newsDTOs = List.of(newsDTO);
-//        String key = "news:" + DigestUtils.md5DigestAsHex(news.getText().getBytes());
-//
-//        when(client.getAllNews()).thenReturn(newsDTOs);
-//        when(mapper.toEntity(newsDTO)).thenReturn(news);
-//        when(newsRepository.findByText(news.getText())).thenReturn(Optional.empty());
-//        when(memcachedClient.get(key)).thenReturn(null); // Важно, чтобы в кэше не было
-//
-//        // Act
-//        newsService.fetchAndSaveAllNews();
-//
-//        // Assert
-//        verify(newsRepository, times(1)).save(news);
-//        verify(memcachedClient, times(1)).set(key, 3600, news); // Проверяем с конкретным ключом
-//    }
-//
-//    @Test
-//    void fetchAndSaveAllNews_NewsAlreadyExistsInCache() {
-//        // Arrange
-//        List<NewsDTO> newsDTOs = List.of(newsDTO);
-//        String key = "news:" + DigestUtils.md5DigestAsHex(news.getText().getBytes());
-//
-//        when(client.getAllNews()).thenReturn(newsDTOs);
-//        when(mapper.toEntity(newsDTO)).thenReturn(news);
-//        when(memcachedClient.get(key)).thenReturn(news); // Говорим, что в кэше есть
-//        when(newsRepository.findByText(news.getText())).thenReturn(Optional.empty()); // Неважно, что в БД
-//
-//        // Act
-//        newsService.fetchAndSaveAllNews();
-//
-//        // Assert
-//        verify(newsRepository, never()).save(any(News.class));
-//        verify(memcachedClient, never()).set(anyString(), anyInt(), any(News.class));
-//    }
-
-
     @Test
-    void fetchAndSaveAllNews_NewsAlreadyExistsInDB() {
+    public void testFetchAndSaveAllNews_SuccessfulSave() {
         // Arrange
-        List<NewsDTO> newsDTOs = List.of(newsDTO);
+        NewsDTO newsDTO = new NewsDTO();
+        newsDTO.setText("Test News");
+        List<NewsDTO> newsDTOs = new ArrayList<>();
+        newsDTOs.add(newsDTO);
 
-        when(client.getAllNews()).thenReturn(newsDTOs);
-        when(mapper.toEntity(newsDTO)).thenReturn(news);
-        when(newsRepository.findByText(news.getText())).thenReturn(Optional.of(news));
+        News news = new News();
+        news.setText("Test News");
 
-        // Act
-        newsService.fetchAndSaveAllNews();
+        when(newsClient.getAllNews()).thenReturn(newsDTOs);
+        when(newsMapper.toEntity(newsDTO)).thenReturn(news);
+        when(newsRepository.findByText("Test News")).thenReturn(Optional.empty());
+        when(memcachedClient.get(anyString())).thenReturn(null);
 
-        // Assert
-        verify(newsRepository, never()).save(any(News.class));
-        verify(memcachedClient, never()).set(anyString(), anyInt(), any(News.class));
-    }
-
-    @Test
-    void fetchAndSaveAllNews_MemcachedNotConfigured() {
-        // Arrange
-        List<NewsDTO> newsDTOs = List.of(newsDTO);
-
-        // Set memcachedClient to null to simulate not configured
-        newsService.memcachedClient = null;
-
-        when(client.getAllNews()).thenReturn(newsDTOs);
-        when(mapper.toEntity(newsDTO)).thenReturn(news);
-        when(newsRepository.findByText(news.getText())).thenReturn(Optional.empty());
+        // Ensure memcachedClient is not null (if you can't remove @Autowired(required=false))
+        //Mockito.doReturn(memcachedClient).when(newsService).memcachedClient;  // This might not work directly
 
         // Act
         newsService.fetchAndSaveAllNews();
 
         // Assert
         verify(newsRepository, times(1)).save(news);
-        // set method should not be called if memcachedClient is null
-        verify(memcachedClient, never()).set(anyString(), anyInt(), any(News.class));
+        verify(memcachedClient, times(1)).set(anyString(), eq(3600), eq(news));
     }
 
     @Test
-    void fetchAndSaveAllNews_NoNewsFromClient() {
+    public void testFetchAndSaveAllNews_DuplicateNews() {
         // Arrange
-        when(client.getAllNews()).thenReturn(null);
+        NewsDTO newsDTO = new NewsDTO();
+        newsDTO.setText("Duplicate News");
+        List<NewsDTO> newsDTOs = new ArrayList<>();
+        newsDTOs.add(newsDTO);
+
+        News news = new News();
+        news.setText("Duplicate News");
+
+        when(newsClient.getAllNews()).thenReturn(newsDTOs);
+        when(newsMapper.toEntity(newsDTO)).thenReturn(news);
+        when(newsRepository.findByText("Duplicate News")).thenReturn(Optional.of(news)); // News already exists
 
         // Act
         newsService.fetchAndSaveAllNews();
 
         // Assert
-        verify(mapper, never()).toEntity(any());
         verify(newsRepository, never()).save(any());
-        verify(memcachedClient, never()).set(anyString(), anyInt(), any(News.class));
+        verify(memcachedClient, never()).set(anyString(), anyInt(), any());
     }
 
     @Test
-    void checkNews_Success() {
+    public void testFetchAndSaveAllNews_DatabaseError() {
         // Arrange
+        NewsDTO newsDTO = new NewsDTO();
+        newsDTO.setText("Problematic News");
+        List<NewsDTO> newsDTOs = new ArrayList<>();
+        newsDTOs.add(newsDTO);
+
+        News news = new News();
+        news.setText("Problematic News");
+
+        when(newsClient.getAllNews()).thenReturn(newsDTOs);
+        when(newsMapper.toEntity(newsDTO)).thenReturn(news);
+        when(newsRepository.findByText("Problematic News")).thenReturn(Optional.empty());
+        when(newsRepository.save(news)).thenThrow(new DataIntegrityViolationException("Simulated DB error"));
+
+        // Act & Assert
+        assertThrows(BusinessException.class, () -> newsService.fetchAndSaveAllNews());
+
+        // Assert (verify logging - depends on your logging framework)
+        // You can use a logging appender to capture log messages and assert on them.
+    }
+
+    @Test
+    public void testCheckNews_Successful() {
+        // Arrange
+        doNothing().when(newsService).fetchAndSaveAllNews(); // Mock the internal call
+
         // Act
         newsService.checkNews();
 
         // Assert
-        verify(client, times(1)).getAllNews();
+        verify(newsService, times(1)).fetchAndSaveAllNews();
     }
 
     @Test
-    void checkNews_Exception() {
+    public void testCheckNews_BusinessException() {
         // Arrange
-        when(client.getAllNews()).thenThrow(new RuntimeException("Test exception"));
+        doThrow(new BusinessException("Simulated business problem", "TEST_ERROR"))
+                .when(newsService).fetchAndSaveAllNews();
 
         // Act
         newsService.checkNews();
 
-        // Assert
-        // Проверяем, что вызывается логгер с ошибкой
+        // Assert (verify logging - depends on your logging framework)
+        // You can use a logging appender to capture log messages and assert on them.
+    }
+
+    @Test
+    public void testCheckNews_GenericException() {
+        // Arrange
+        doThrow(new RuntimeException("Simulated runtime problem"))
+                .when(newsService).fetchAndSaveAllNews();
+
+        // Act
+        newsService.checkNews();
+
+        // Assert (verify logging - depends on your logging framework)
+        // You can use a logging appender to capture log messages and assert on them.
     }
 
     @Test

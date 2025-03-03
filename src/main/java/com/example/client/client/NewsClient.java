@@ -11,7 +11,7 @@ import java.util.List;
  * Клиент для взаимодействия с API новостей.
  * Используется для получения списка всех новостей с удалённого сервиса.
  */
-@FeignClient(name = "messageClient", url = "https://chilly-chairs-prove.loca.lt/news")
+@FeignClient(name = "messageClient", url = "https://tricky-lies-help.loca.lt/news")
 public interface NewsClient {
 
     /**

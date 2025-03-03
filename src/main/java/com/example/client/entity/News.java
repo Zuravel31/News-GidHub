@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 @AllArgsConstructor
@@ -14,7 +15,7 @@ import java.time.LocalDateTime;
 @Builder
 @Table(name = "newz")
 @Entity
-public class News {
+public class News implements Serializable { //чтобы работал memceched
     @Id
 @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
