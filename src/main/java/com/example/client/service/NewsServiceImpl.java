@@ -3,12 +3,12 @@ package com.example.client.service;
 import com.example.client.client.NewsClient;
 import com.example.client.dto.NewsDTO;
 import com.example.client.entity.News;
+import com.example.client.job.BusinessException;
 import com.example.client.mapper.NewsMapper;
 import com.example.client.repository.NewsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.spy.memcached.MemcachedClient;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -22,17 +22,16 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class NewsServiceImpl implements NewsService {
 
-    private final NewsMapper mapper;
+    private static final String NEWS_PREFIX = "news:";
+
+    private final MemcachedClient memcachedClient;
 
     private final NewsRepository newsRepository;
 
+    private final NewsMapper mapper;
+
     private final NewsClient client;
 
-    private static final String NEWS_PREFIX = "news:";
-    @Autowired(required = false) // Memcached может быть не настроен
-    MemcachedClient memcachedClient;
-
-    // Метод для генерации ключа на основе MD5 хеша
     private String generateKey(String text) {
         String hash = DigestUtils.md5DigestAsHex(text.getBytes());
         return NEWS_PREFIX + hash;
@@ -44,39 +43,35 @@ public class NewsServiceImpl implements NewsService {
             List<News> newsList = newsDTOs.stream()
                     .map(mapper::toEntity)
                     .toList();
-
             for (News news : newsList) {
-                // Генерируем ключ на основе MD5 хеша
                 String key = generateKey(news.getText());
                 try {
-                    // 1. Проверяем Memcached
                     News cachedNews = (memcachedClient != null) ? (News) memcachedClient.get(key) : null;
-                    // 2. Проверяем базу данных, если нет в Memcached
                     Optional<News> existingNews = newsRepository.findByText(news.getText());
-                    // 3. Если новость есть в Memcached ИЛИ в базе данных, пропускаем
+
                     if (cachedNews != null || existingNews.isPresent()) {
-//                        log.info("Новость найдена в Memcached или базе данных, пропущена: {}", news.getText());
-                        continue; // Переходим к следующей новости
+//                        log.warn("Новость уже существует в кэше или базе данных: {}", news.getText());
+                        continue;
                     }
-                    // 4. Установка значения для isSent, если оно не установлено
+
                     if (news.getIsSent() == null) {
-                        news.setIsSent(false); // или true, в зависимости от логики
+                        news.setIsSent(false);
                     }
-                    // 5. Сохранение новости
+
                     try {
                         newsRepository.save(news);
                         log.info("Новость сохранена в базе данных: {}", news.getText());
-
-                        // 6. Кэшируем новость в Memcached после сохранения в базу данных
                         if (memcachedClient != null) {
-                            memcachedClient.set(key, 3600, news); // Кэшируем на 1 час
+                            memcachedClient.set(key, 3600, news);
                             log.info("Новость сохранена в Memcached: {}", news.getText());
                         }
                     } catch (DataIntegrityViolationException e) {
                         log.error("Ошибка при сохранении новости в базе данных: {}", news.getText(), e);
+                        throw new BusinessException("Ошибка при сохранении новости в БД: " + news.getText(), "DB_SAVE_ERROR", e);
                     }
                 } catch (Exception e) {
                     log.error("Ошибка при обработке новости {}: {}", news.getText(), e.getMessage(), e);
+                    throw new BusinessException("Ошибка при обработке новости: " + news.getText(), "NEWS_PROCESSING_ERROR", e);
                 }
             }
             log.info("Обработано {} новостей.", newsList.size());
@@ -85,17 +80,18 @@ public class NewsServiceImpl implements NewsService {
         }
     }
 
-
-    @Scheduled(fixedRate = 300_000)  // Запускать каждые 5 минут
+    @Scheduled(fixedRate = 300_000)
     public void checkNews() {
         log.info("Начало метода checkNews");
-
         try {
             log.info("Запрос новостей у клиента");
             fetchAndSaveAllNews();
             log.info("Завершение метода checkNews");
-        } catch (Exception e) {
-            log.error("Ошибка при проверке новостей", e);
+        } catch (BusinessException e) { // Обрабатываем BusinessException
+            log.error("Ошибка при проверке новостей: {} - {}", e.getErrorCode(), e.getMessage(), e);
+            // Здесь можно выполнить другие действия, например, отправить уведомление.
+        } catch (Exception e) {  // Все остальные исключения
+            log.error("Непредвиденная ошибка при проверке новостей", e); // Более общее сообщение
         }
     }
 }
