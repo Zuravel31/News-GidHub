@@ -58,13 +58,10 @@ class NewsServiceImplTest {
         when(newsMapper.toEntity(newsDTO)).thenReturn(news);
         when(newsRepository.findByText("Test News")).thenReturn(Optional.empty());
         when(memcachedClient.get(anyString())).thenReturn(null);
-
         // Ensure memcachedClient is not null (if you can't remove @Autowired(required=false))
-        //Mockito.doReturn(memcachedClient).when(newsService).memcachedClient;  // This might not work directly
-
+        //Mockito.doReturn(memcachedClient).when(newsService).memcachedClient;  // This might not work directl
         // Act
         newsService.fetchAndSaveAllNews();
-
         // Assert
         verify(newsRepository, times(1)).save(news);
         verify(memcachedClient, times(1)).set(anyString(), eq(3600), eq(news));
@@ -84,10 +81,8 @@ class NewsServiceImplTest {
         when(newsClient.getAllNews()).thenReturn(newsDTOs);
         when(newsMapper.toEntity(newsDTO)).thenReturn(news);
         when(newsRepository.findByText("Duplicate News")).thenReturn(Optional.of(news)); // News already exists
-
         // Act
         newsService.fetchAndSaveAllNews();
-
         // Assert
         verify(newsRepository, never()).save(any());
         verify(memcachedClient, never()).set(anyString(), anyInt(), any());
