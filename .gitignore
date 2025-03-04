@@ -13,6 +13,9 @@ target/
 .springBeans
 .sts4-cache
 
+# Файл с переменными окружения
+.env
+
 ### IntelliJ IDEA ###
 .idea
 *.iws
@@ -32,5 +35,3 @@ build/
 ### VS Code ###
 .vscode/
 
-# Файл с переменными окружения
-.env
